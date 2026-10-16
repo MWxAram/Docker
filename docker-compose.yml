@@ -1,0 +1,12 @@
+# Сам бэкенд получает docker.sock (ему нужно создавать контейнеры).
+# В песочницу сокет НЕ пробрасывается.
+# Путь SANDBOX_DIR одинаковый на хосте и в контейнере, иначе bind-mount не найдёт файлы.
+services:
+  backend:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      SANDBOX_DIR: /tmp/sandbox
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/sandbox:/tmp/sandbox

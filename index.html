@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Песочница для кода</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #e9edf1;
+    --panel: #ffffff;
+    --ink: #1a2330;
+    --muted: #5d6a7a;
+    --line: #cfd7e0;
+    --accent: #1f5fbf;
+    --accent-ink: #ffffff;
+    --code-bg: #f6f8fa;
+    --ok: #17734a;      --ok-bg: #dcf3e7;
+    --bad: #b02a2a;     --bad-bg: #fbe2e2;
+    --warn: #8a5a00;    --warn-bg: #fdefc9;
+    --err-text: #9c2323;
+    --sans: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12181f;
+      --panel: #1b232d;
+      --ink: #e4e9ef;
+      --muted: #93a1b2;
+      --line: #2e3947;
+      --accent: #5a9bff;
+      --accent-ink: #0c1420;
+      --code-bg: #141b23;
+      --ok: #6fdba3;   --ok-bg: #173628;
+      --bad: #ff8f8f;  --bad-bg: #3d1d1d;
+      --warn: #f3c969; --warn-bg: #3a2e12;
+      --err-text: #ff9d9d;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 var(--sans);
+    display: flex; flex-direction: column;
+  }
+  header { padding: 16px 24px 4px; }
+  h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+
+  main {
+    flex: 1; min-height: 0;
+    display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 16px; padding: 12px 24px 24px;
+  }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; padding: 12px 12px 20px; }
+    header { padding: 14px 12px 0; }
+  }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    display: flex; flex-direction: column; min-height: 320px; min-width: 0;
+  }
+  .bar {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .bar .spacer { flex: 1; }
+  label { font-size: 13px; color: var(--muted); }
+
+  select, button {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px;
+  }
+  select { min-width: 140px; cursor: pointer; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.run {
+    background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+    font-weight: 600; padding: 7px 18px;
+  }
+  button.run:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .55; cursor: progress; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  textarea {
+    flex: 1; width: 100%; resize: none; border: 0; outline-offset: -2px;
+    background: var(--code-bg); color: var(--ink);
+    font: 14px/1.55 var(--mono); tab-size: 4; padding: 14px;
+    border-radius: 0 0 8px 8px; min-height: 260px;
+  }
+
+  #status {
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+    font-weight: 600; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  }
+  #status small { font-weight: 400; color: var(--muted); font-size: 13px; }
+  #status.idle { color: var(--muted); font-weight: 400; }
+  #status.ok  { background: var(--ok-bg);  color: var(--ok); }
+  #status.bad { background: var(--bad-bg); color: var(--bad); }
+  #status.warn{ background: var(--warn-bg);color: var(--warn); }
+  #status.run { color: var(--accent); }
+
+  #out { flex: 1; overflow: auto; padding: 12px 14px; }
+  #out h2 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  #out h2:not(:first-child) { margin-top: 14px; }
+  pre {
+    margin: 0; padding: 10px 12px; background: var(--code-bg); border-radius: 6px;
+    font: 13px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word;
+  }
+  pre.err { color: var(--err-text); }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Песочница для кода</h1>
+  <p>Код выполняется в изолированном Docker-контейнере: 256 МБ памяти, 10 секунд, без сети.</p>
+</header>
+
+<main>
+  <section aria-label="Редактор">
+    <div class="bar">
+      <label for="lang">Язык</label>
+      <select id="lang"></select>
+      <button id="memtest" type="button" title="Вставить программу, которая занимает всю память">Вставить тест памяти</button>
+      <span class="spacer"></span>
+      <button id="run" class="run" type="button">Запустить</button>
+    </div>
+    <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off"
+              aria-label="Код программы" placeholder="Напишите код здесь"></textarea>
+  </section>
+
+  <section aria-label="Результат">
+    <div id="status" class="idle">Нажмите «Запустить» или Ctrl + Enter</div>
+    <div id="out"></div>
+  </section>
+</main>
+
+<script>
+const T = String.raw;
+
+// Шаблоны "Hello, world" и программы, съедающие память
+const HELLO = {
+  python: T`print("Hello, world!")`,
+  javascript: T`console.log("Hello, world!");`,
+  typescript: T`const msg: string = "Hello, world!";
+console.log(msg);`,
+  java: T`public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello, world!");
+    }
+}`,
+  c: T`#include <stdio.h>
+
+int main(void) {
+    printf("Hello, world!\n");
+    return 0;
+}`,
+  cpp: T`#include <iostream>
+
+int main() {
+    std::cout << "Hello, world!" << std::endl;
+    return 0;
+}`,
+  go: T`package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello, world!")
+}`,
+  rust: T`fn main() {
+    println!("Hello, world!");
+}`,
+  ruby: T`puts "Hello, world!"`,
+  php: T`<?php
+echo "Hello, world!" . PHP_EOL;`,
+  bash: T`echo "Hello, world!"`,
+};
+
+const MEMTEST = {
+  python: T`data = []
+while True:
+    data.append(b"x" * 10_000_000)`,
+  javascript: T`const data = [];
+while (true) data.push(Buffer.alloc(10_000_000, 1));`,
+  typescript: T`const data: Buffer[] = [];
+while (true) data.push(Buffer.alloc(10_000_000, 1));`,
+  java: T`import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List<byte[]> data = new ArrayList<>();
+        while (true) data.add(new byte[10_000_000]);
+    }
+}`,
+  c: T`#include <stdlib.h>
+#include <string.h>
+
+int main(void) {
+    while (1) {
+        char *p = malloc(10000000);
+        memset(p, 1, 10000000);
+    }
+}`,
+  cpp: T`#include <cstring>
+#include <vector>
+
+int main() {
+    std::vector<char*> v;
+    while (true) {
+        char* p = new char[10000000];
+        memset(p, 1, 10000000);
+        v.push_back(p);
+    }
+}`,
+  go: T`package main
+
+func main() {
+	var data [][]byte
+	for {
+		b := make([]byte, 10_000_000)
+		for i := range b {
+			b[i] = 1
+		}
+		data = append(data, b)
+	}
+}`,
+  rust: T`fn main() {
+    let mut data: Vec<Vec<u8>> = Vec::new();
+    loop {
+        data.push(vec![1u8; 10_000_000]);
+    }
+}`,
+  ruby: T`data = []
+loop { data << "x" * 10_000_000 }`,
+  php: T`<?php
+$data = [];
+while (true) { $data[] = str_repeat("x", 10000000); }`,
+  bash: T`x=a
+while true; do x="$x$x"; done`,
+};
+
+const MESSAGES = {
+  ok: ["Выполнено", "ok"],
+  runtime_error: ["Программа завершилась с ошибкой", "bad"],
+  compilation_error: ["Ошибка компиляции", "bad"],
+  timeout: ["Остановлено: код работал дольше 10 секунд", "warn"],
+  memory_limit_exceeded: ["Остановлено: код занял больше 256 МБ памяти", "warn"],
+  internal_error: ["Ошибка песочницы", "bad"],
+};
+
+const $ = (id) => document.getElementById(id);
+const langSel = $("lang"), codeBox = $("code"), runBtn = $("run");
+const statusEl = $("status"), outEl = $("out");
+
+// запомнить выбор между перезагрузками (если хранилище недоступно, просто работаем без него)
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+let lastTemplate = "";   // чтобы не затирать код, который пользователь уже правил
+
+function setCode(text) { codeBox.value = text; lastTemplate = text; }
+
+function onLangChange() {
+  store.set("lang", langSel.value);
+  const current = codeBox.value.trim();
+  const untouched = !current || current === lastTemplate.trim();
+  if (untouched) setCode(HELLO[langSel.value] || "");
+}
+
+function setStatus(text, cls, extra) {
+  statusEl.className = cls;
+  statusEl.textContent = text;
+  if (extra) { const s = document.createElement("small"); s.textContent = extra; statusEl.append(s); }
+}
+
+function block(title, text, cls) {
+  const h = document.createElement("h2"); h.textContent = title;
+  const p = document.createElement("pre"); p.textContent = text;
+  if (cls) p.className = cls;
+  outEl.append(h, p);
+}
+
+function showResult(r) {
+  const [msg, cls] = MESSAGES[r.status] || [r.status, "bad"];
+  const bits = [];
+  if (r.time != null) bits.push(r.time + " с");
+  if (r.exit_code != null) bits.push("код выхода " + r.exit_code);
+  setStatus(msg, cls, bits.join(", "));
+
+  outEl.replaceChildren();
+  if (r.stdout) block("Вывод программы", r.stdout);
+  if (r.stderr) block(r.status === "compilation_error" ? "Сообщения компилятора" : "Ошибки", r.stderr, "err");
+  if (!r.stdout && !r.stderr) {
+    const p = document.createElement("p"); p.className = "empty";
+    p.textContent = "Программа ничего не вывела.";
+    outEl.append(p);
+  }
+  if (r.truncated) {
+    const p = document.createElement("p"); p.className = "empty";
+    p.textContent = "Вывод слишком длинный и обрезан до 64 КБ.";
+    outEl.append(p);
+  }
+}
+
+async function run() {
+  if (runBtn.disabled) return;
+  runBtn.disabled = true;
+  outEl.replaceChildren();
+  setStatus("Запускаю…", "run");
+  try {
+    const res = await fetch("/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: langSel.value, code: codeBox.value }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      const detail = typeof e.detail === "string" ? e.detail : "проверьте код и язык";
+      setStatus("Запрос отклонён: " + detail, "bad");
+      return;
+    }
+    const { id } = await res.json();
+    for (;;) {
+      const r = await (await fetch("/run/" + id)).json();
+      if (r.state === "finished") { showResult(r); break; }
+      setStatus(r.state === "queued" ? "В очереди…" : "Выполняется…", "run");
+      await new Promise((ok) => setTimeout(ok, 300));
+    }
+  } catch {
+    setStatus("Нет связи с сервером. Проверьте, что бэкенд запущен.", "bad");
+  } finally {
+    runBtn.disabled = false;
+  }
+}
+
+// Tab вставляет отступ вместо перехода фокуса
+codeBox.addEventListener("keydown", (e) => {
+  if (e.key === "Tab" && !e.shiftKey) {
+    e.preventDefault();
+    const { selectionStart: s, selectionEnd: en } = codeBox;
+    codeBox.setRangeText("    ", s, en, "end");
+  }
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
+});
+
+runBtn.addEventListener("click", run);
+langSel.addEventListener("change", onLangChange);
+$("memtest").addEventListener("click", () => setCode(MEMTEST[langSel.value] || ""));
+
+async function init() {
+  let langs = Object.keys(HELLO);
+  try {
+    const r = await fetch("/languages");
+    if (r.ok) langs = await r.json();
+  } catch {}
+  for (const l of langs) langSel.add(new Option(l, l));
+  const saved = store.get("lang");
+  langSel.value = langs.includes(saved) ? saved : langs[0];
+  setCode(HELLO[langSel.value] || "");
+}
+init();
+</script>
+</body>
+</html>
