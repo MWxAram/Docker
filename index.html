@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Песочница для кода</title>
+<title>Docker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -21,6 +21,8 @@
     --bad: #b02a2a;     --bad-bg: #fbe2e2;
     --warn: #8a5a00;    --warn-bg: #fdefc9;
     --err-text: #9c2323;
+    --tk-kw: #7c3aed; --tk-str: #0a7c4f; --tk-com: #718096; --tk-num: #b45309; --tk-fn: #1f5fbf;
+    --tk-ty: #0e7490; --tk-lit: #c2410c; --tk-pp: #be185d; --tk-var: #9a6700; --tk-tag: #be123c; --tk-attr: #0e7490;
     --sans: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
@@ -38,10 +40,12 @@
       --bad: #ff8f8f;  --bad-bg: #3d1d1d;
       --warn: #f3c969; --warn-bg: #3a2e12;
       --err-text: #ff9d9d;
+      --tk-kw: #b79cff; --tk-str: #7ee2a8; --tk-com: #7f8c9b; --tk-num: #f2b266; --tk-fn: #7db4ff;
+      --tk-ty: #5fd3e6; --tk-lit: #ff9a6b; --tk-pp: #ff8fc0; --tk-var: #ffd27a; --tk-tag: #ff8a9e; --tk-attr: #5fd3e6;
     }
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  html, body { min-height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.5 var(--sans);
@@ -52,12 +56,15 @@
   header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 
   main {
-    flex: 1; min-height: 0;
-    display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    flex: none; height: max(440px, calc(100vh - 100px));
+    display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
     gap: 16px; padding: 12px 24px 24px;
   }
   @media (max-width: 860px) {
-    main { grid-template-columns: 1fr; padding: 12px 12px 20px; }
+    main { grid-template-columns: 1fr; grid-template-rows: none; height: auto; padding: 12px 12px 20px; }
+    #history { margin: 0 12px 20px; }
+    .hrow { grid-template-columns: 64px minmax(0, 1fr) auto; }
+    .hlang { display: none; }
     header { padding: 14px 12px 0; }
   }
   section {
@@ -86,12 +93,48 @@
   button:disabled { opacity: .55; cursor: progress; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  textarea {
-    flex: 1; width: 100%; resize: none; border: 0; outline-offset: -2px;
-    background: var(--code-bg); color: var(--ink);
-    font: 14px/1.55 var(--mono); tab-size: 4; padding: 14px;
-    border-radius: 0 0 8px 8px; min-height: 260px;
+  .editor { position: relative; flex: 1; min-height: 260px; background: var(--code-bg);
+            border-radius: 0 0 8px 8px; overflow: hidden; }
+  #hl, #code {
+    position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; border: 0; border-radius: 0;
+    font: 14px/1.55 var(--mono); tab-size: 4; letter-spacing: 0; font-variant-ligatures: none;
+    white-space: pre; word-wrap: normal; overflow-wrap: normal;
   }
+  #hl { padding: 14px 32px 32px 14px; overflow: hidden; pointer-events: none; color: var(--ink); }
+  #code { padding: 14px; resize: none; overflow: auto; background: transparent; color: transparent;
+          caret-color: var(--ink); outline-offset: -2px; }
+  #code::placeholder { color: var(--muted); }
+  #code::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .tk-kw { color: var(--tk-kw); } .tk-str { color: var(--tk-str); }
+  .tk-com { color: var(--tk-com); font-style: italic; } .tk-num { color: var(--tk-num); }
+  .tk-fn { color: var(--tk-fn); } .tk-ty { color: var(--tk-ty); } .tk-lit { color: var(--tk-lit); }
+  .tk-pp { color: var(--tk-pp); } .tk-var { color: var(--tk-var); }
+  .tk-tag { color: var(--tk-tag); } .tk-attr { color: var(--tk-attr); }
+
+  .attach { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap;
+            border-bottom: 1px solid var(--line); font-size: 13px; }
+  .attach.drop { background: var(--code-bg); outline: 2px dashed var(--accent); outline-offset: -4px; }
+  .attach button { padding: 4px 10px; font-size: 13px; }
+  .hint { color: var(--muted); }
+  #chips { display: contents; }
+  .chip-file { background: var(--code-bg); font: 12px var(--mono); }
+
+  #history { min-height: 0; margin: 0 24px 28px; }
+  .hist-head { display: flex; align-items: center; justify-content: space-between;
+               padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .hist-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  #hempty { margin: 0; padding: 14px 12px; }
+  #hlist { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; }
+  .hrow { display: grid; grid-template-columns: 72px 92px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+          width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+          border-radius: 0; padding: 9px 12px; background: transparent; }
+  .hrow:hover { background: var(--code-bg); }
+  .hcode { font: 13px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hwhen, .hlang { color: var(--muted); font-size: 13px; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+  .chip.ok { background: var(--ok-bg); color: var(--ok); }
+  .chip.bad { background: var(--bad-bg); color: var(--bad); }
+  .chip.warn { background: var(--warn-bg); color: var(--warn); }
 
   #status {
     padding: 12px 14px; border-bottom: 1px solid var(--line);
@@ -113,12 +156,15 @@
   }
   pre.err { color: var(--err-text); }
   .empty { color: var(--muted); }
+  #out.preview { padding: 0; display: flex; }
+  #out iframe { flex: 1; width: 100%; min-height: 300px; border: 0; background: #fff;
+                border-radius: 0 0 8px 8px; }
+  textarea.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Песочница для кода</h1>
-  <p>Код выполняется в изолированном Docker-контейнере: 256 МБ памяти, 10 секунд, без сети.</p>
+  <h1>Docker</h1>
 </header>
 
 <main>
@@ -130,8 +176,20 @@
       <span class="spacer"></span>
       <button id="run" class="run" type="button">Запустить</button>
     </div>
-    <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off"
-              aria-label="Код программы" placeholder="Напишите код здесь"></textarea>
+    <div id="attach" class="attach">
+      <button id="upload" type="button" title="Загрузить код из файла в редактор">Открыть код из файла</button>
+      <input id="file" type="file" hidden
+             accept=".py,.js,.mjs,.ts,.java,.c,.cpp,.cc,.go,.rs,.rb,.php,.sh,.html,.htm">
+      <button id="attachBtn" type="button" title="Файлы и ZIP-архивы, которые программа сможет читать">Прикрепить файлы</button>
+      <input id="files" type="file" multiple hidden>
+      <span id="attachHint" class="hint">Перетащите сюда файлы или ZIP: они будут лежать рядом с программой</span>
+      <span id="chips"></span>
+    </div>
+    <div class="editor">
+      <pre id="hl" aria-hidden="true"></pre>
+      <textarea id="code" wrap="off" spellcheck="false" autocapitalize="off" autocomplete="off"
+                aria-label="Код программы" placeholder="Напишите код здесь или перетащите файл"></textarea>
+    </div>
   </section>
 
   <section aria-label="Результат">
@@ -139,6 +197,15 @@
     <div id="out"></div>
   </section>
 </main>
+
+<section id="history" aria-label="История запусков">
+  <div class="hist-head">
+    <h2>История запусков</h2>
+    <button id="hclear" type="button" hidden>Очистить</button>
+  </div>
+  <p id="hempty" class="empty">Пока пусто. Здесь появятся ваши запуски.</p>
+  <ul id="hlist"></ul>
+</section>
 
 <script>
 const T = String.raw;
@@ -180,6 +247,20 @@ func main() {
   php: T`<?php
 echo "Hello, world!" . PHP_EOL;`,
   bash: T`echo "Hello, world!"`,
+  html: T`<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; height: 100vh; display: grid; place-items: center;
+         font-family: sans-serif; background: #f4f6f8; }
+  h1 { color: #1f5fbf; }
+</style>
+</head>
+<body>
+  <h1>Привет, мир!</h1>
+</body>
+</html>`,
 };
 
 const MEMTEST = {
@@ -266,13 +347,22 @@ const store = {
 
 let lastTemplate = "";   // чтобы не затирать код, который пользователь уже правил
 
-function setCode(text) { codeBox.value = text; lastTemplate = text; }
+function setCode(text) { codeBox.value = text; lastTemplate = text; highlight(); }
+
+function updateLangUi() {
+  const isHtml = langSel.value === "html";
+  $("memtest").disabled = isHtml;
+  $("memtest").title = isHtml ? "Для HTML не нужен: страница выполняется в браузере"
+                              : "Вставить программу, которая занимает всю память";
+}
 
 function onLangChange() {
   store.set("lang", langSel.value);
+  updateLangUi();
   const current = codeBox.value.trim();
   const untouched = !current || current === lastTemplate.trim();
   if (untouched) setCode(HELLO[langSel.value] || "");
+  highlight();
 }
 
 function setStatus(text, cls, extra) {
@@ -310,16 +400,35 @@ function showResult(r) {
   }
 }
 
+function renderHtml() {
+  const frame = document.createElement("iframe");
+  frame.title = "Результат HTML";
+  // без allow-same-origin страница не получает доступа к нашему сайту
+  frame.setAttribute("sandbox", "allow-scripts allow-forms allow-modals");
+  frame.srcdoc = codeBox.value;
+  outEl.className = "preview";
+  outEl.replaceChildren(frame);
+  setStatus("Страница отрисована", "ok", "в браузере, не в Docker");
+  addHistory("html");
+}
+
 async function run() {
   if (runBtn.disabled) return;
+  if (langSel.value === "html") { renderHtml(); return; }
+  outEl.className = "";
   runBtn.disabled = true;
   outEl.replaceChildren();
   setStatus("Запускаю…", "run");
   try {
+    let files = [];
+    if (attachments.length) {
+      setStatus("Загружаю файлы…", "run");
+      files = await Promise.all(attachments.map(async (f) => ({ name: f.name, data: await toB64(f) })));
+    }
     const res = await fetch("/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ language: langSel.value, code: codeBox.value }),
+      body: JSON.stringify({ language: langSel.value, code: codeBox.value, files }),
     });
     if (!res.ok) {
       const e = await res.json().catch(() => ({}));
@@ -330,7 +439,7 @@ async function run() {
     const { id } = await res.json();
     for (;;) {
       const r = await (await fetch("/run/" + id)).json();
-      if (r.state === "finished") { showResult(r); break; }
+      if (r.state === "finished") { showResult(r); addHistory(r.status); break; }
       setStatus(r.state === "queued" ? "В очереди…" : "Выполняется…", "run");
       await new Promise((ok) => setTimeout(ok, 300));
     }
@@ -347,26 +456,53 @@ codeBox.addEventListener("keydown", (e) => {
     e.preventDefault();
     const { selectionStart: s, selectionEnd: en } = codeBox;
     codeBox.setRangeText("    ", s, en, "end");
+    highlight();
   }
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
 });
 
-runBtn.addEventListener("click", run);
-langSel.addEventListener("change", onLangChange);
-$("memtest").addEventListener("click", () => setCode(MEMTEST[langSel.value] || ""));
-
-async function init() {
-  let langs = Object.keys(HELLO);
-  try {
-    const r = await fetch("/languages");
-    if (r.ok) langs = await r.json();
-  } catch {}
-  for (const l of langs) langSel.add(new Option(l, l));
-  const saved = store.get("lang");
-  langSel.value = langs.includes(saved) ? saved : langs[0];
-  setCode(HELLO[langSel.value] || "");
-}
-init();
-</script>
-</body>
-</html>
+// ---------- подсветка синтаксиса (без внешних библиотек)
+const W = (s) => new Set(s.split(" "));
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const sp = (c, t) => `<span class="tk-${c}">${esc(t)}</span>`;
+const CL = {
+  com: String.raw`\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|(?![\s\S]))`,
+  str: String.raw`"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?`,
+};
+const C_KW = "if else for while do switch case break continue return goto sizeof typedef struct union enum static const extern volatile register inline unsigned signed auto default";
+const C_TY = "int char short long float double void size_t bool FILE printf scanf malloc free memset strlen";
+const SPECS = {
+  python: {
+    com: String.raw`#[^\n]*`,
+    str: String.raw`"""[\s\S]*?(?:"""|(?![\s\S]))|'''[\s\S]*?(?:'''|(?![\s\S]))|` + CL.str,
+    pp: String.raw`@[A-Za-z_][\w.]*`,
+    kw: "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield",
+    lit: "True False None",
+    ty: "int str float list dict set tuple bool print len range open input type enumerate zip map filter sum min max abs sorted super self",
+  },
+  javascript: {
+    com: CL.com, str: CL.str + "|`(?:\\\\.|[^`\\\\])*`?",
+    kw: "const let var function return if else for while do switch case break continue new this class extends import export from default async await try catch finally throw typeof instanceof in of delete void yield static get set",
+    lit: "true false null undefined NaN Infinity",
+    ty: "console Math JSON Object Array String Number Boolean Promise Map Set Date Error Buffer require module process",
+  },
+  java: {
+    ...CL, pp: String.raw`@[A-Za-z_]\w*`,
+    kw: "abstract assert break case catch class continue default do else enum extends final finally for if implements import instanceof interface native new package private protected public return static super switch synchronized this throw throws try void volatile while",
+    lit: "true false null",
+    ty: "int long double float boolean char byte short String Integer List ArrayList Map HashMap Set Object System var",
+  },
+  c: {
+    ...CL, pp: String.raw`(?<![^\n])[ \t]*#[ \t]*[a-z]+[^\n]*`,
+    kw: C_KW, lit: "NULL true false", ty: C_TY,
+  },
+  go: {
+    com: CL.com, str: CL.str + "|`[^`]*`?",
+    kw: "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var",
+    lit: "true false nil iota",
+    ty: "int int8 int16 int32 int64 uint uint8 uint32 uint64 float32 float64 string bool byte rune error make len cap append copy delete new panic recover fmt",
+  },
+  rust: {
+    com: CL.com, str: String.raw`"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\\n])'`,
+    pp: String.raw`'[a-z_]\w*|#!?\[[^\]\n]*\]`, fn: String.raw`[A-Za-z_]\w*!(?=[(\[{])`,
+    kw: "as break const continue crate else enum extern fn for if impl in let loop match mod move mut pub ref return self Self static st
