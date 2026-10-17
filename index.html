@@ -505,4 +505,279 @@ const SPECS = {
   rust: {
     com: CL.com, str: String.raw`"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\\n])'`,
     pp: String.raw`'[a-z_]\w*|#!?\[[^\]\n]*\]`, fn: String.raw`[A-Za-z_]\w*!(?=[(\[{])`,
-    kw: "as break const continue crate else enum extern fn for if impl in let loop match mod move mut pub ref return self Self static st
+    kw: "as break const continue crate else enum extern fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait type unsafe use where while async await dyn",
+    lit: "true false None Some Ok Err",
+    ty: "i8 i16 i32 i64 u8 u16 u32 u64 usize isize f32 f64 bool char str String Vec Option Result Box",
+  },
+  ruby: {
+    com: String.raw`#[^\n]*`, str: CL.str, var: String.raw`:[A-Za-z_]\w*|@@?[A-Za-z_]\w*|\$[A-Za-z_]\w*`,
+    kw: "alias and begin break case class def do else elsif end ensure for if in module next not or redo rescue retry return self super then undef unless until when while yield",
+    lit: "true false nil", ty: "puts print require attr_accessor p lambda proc",
+  },
+  php: {
+    com: CL.com + String.raw`|#[^\n]*`, str: CL.str, var: String.raw`\$[A-Za-z_]\w*`, pp: String.raw`<\?php|\?>`,
+    kw: "abstract and as break case catch class clone const continue declare default do echo else elseif extends final finally fn for foreach function global if implements include include_once instanceof interface namespace new or print private protected public require require_once return static switch throw trait try use var while yield",
+    lit: "true false null TRUE FALSE NULL", ty: "array isset empty count strlen str_repeat var_dump PHP_EOL",
+  },
+  bash: {
+    com: String.raw`(?<![^\s])#[^\n]*`, str: CL.str,
+    var: String.raw`\$(?:\{[^}\n]*\}|[A-Za-z_]\w*|[0-9@#?$!*])`,
+    kw: "if then else elif fi for while until do done case esac in function select return exit break continue local export readonly declare",
+    ty: "echo cd ls cat grep sed awk read printf test source set unset",
+  },
+  css: {
+    com: String.raw`\/\*[\s\S]*?(?:\*\/|(?![\s\S]))`, str: CL.str,
+    pp: String.raw`@[\w-]+|!important`, var: String.raw`#[0-9a-fA-F]{3,8}\b`, fn: String.raw`[A-Za-z-]+(?=\()`,
+    extra: [["tag", String.raw`[.#][A-Za-z_][\w-]*`], ["attr", String.raw`[A-Za-z-]+(?=\s*:(?!:))`]],
+  },
+};
+SPECS.typescript = {
+  ...SPECS.javascript,
+  kw: SPECS.javascript.kw + " interface type enum implements public private protected readonly as namespace declare abstract",
+  ty: SPECS.javascript.ty + " string number boolean any never unknown",
+};
+SPECS.cpp = {
+  ...SPECS.c,
+  kw: C_KW + " class public private protected namespace using template typename new delete this virtual override final constexpr try catch throw operator",
+  lit: "NULL true false nullptr", ty: C_TY + " std string vector map set cout cin endl unique_ptr",
+};
+
+const compiled = {};
+function compile(lang) {
+  const o = SPECS[lang];
+  const rules = [["com", o.com], ["str", o.str], ["pp", o.pp], ["var", o.var], ["fn", o.fn],
+    ...(o.extra || []),
+    ["num", String.raw`\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?(?:[A-Za-z]\w*)?\b`],
+    ["word", String.raw`[A-Za-z_$][\w$]*`]].filter((r) => r[1]);
+  return { rules, re: new RegExp(rules.map((r) => "(" + r[1] + ")").join("|"), "g"),
+           kw: W(o.kw || ""), lit: W(o.lit || ""), ty: W(o.ty || "") };
+}
+
+function hlCode(code, lang) {
+  const spec = compiled[lang] = compiled[lang] || compile(lang);
+  let out = "", last = 0;
+  for (const m of code.matchAll(spec.re)) {
+    out += esc(code.slice(last, m.index));
+    last = m.index + m[0].length;
+    const kind = spec.rules[m.findIndex((g, i) => i > 0 && g !== undefined) - 1][0];
+    let cls = kind;
+    if (kind === "word") {
+      const w = m[0];
+      cls = spec.kw.has(w) ? "kw" : spec.lit.has(w) ? "lit" : spec.ty.has(w) ? "ty"
+          : code[last] === "(" ? "fn" : /^[A-Z]/.test(w) ? "ty" : null;
+    }
+    out += cls ? sp(cls, m[0]) : esc(m[0]);
+  }
+  return out + esc(code.slice(last));
+}
+
+function hlTag(t) {
+  const m = /^(<\/?)([A-Za-z][\w:-]*)([\s\S]*?)(\/?>?)$/.exec(t);
+  if (!m) return esc(t);
+  const attrs = m[3].replace(/([\w:@.-]+)|("[^"]*"?|'[^']*'?)|([\s\S])/g,
+    (_, a, s, o) => (a ? sp("attr", a) : s ? sp("str", s) : esc(o)));
+  return esc(m[1]) + sp("tag", m[2]) + attrs + esc(m[4]);
+}
+
+function hlHtml(code) {
+  let out = "", last = 0;
+  const re = /<!--[\s\S]*?(?:-->|(?![\s\S]))|<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|(?![\s\S]))|<\/?[A-Za-z][^>]*>?/gi;
+  for (const m of code.matchAll(re)) {
+    out += esc(code.slice(last, m.index));
+    last = m.index + m[0].length;
+    if (m[0].startsWith("<!--")) out += sp("com", m[0]);
+    else if (m[1]) {
+      const open = /^<[^>]*>/.exec(m[0])[0];
+      const close = /<\/[a-z]+\s*>$/i.exec(m[0]);
+      const inner = m[0].slice(open.length, close ? m[0].length - close[0].length : m[0].length);
+      out += hlTag(open) + hlCode(inner, m[1].toLowerCase() === "style" ? "css" : "javascript")
+           + (close ? hlTag(close[0]) : "");
+    } else out += hlTag(m[0]);
+  }
+  return out + esc(code.slice(last));
+}
+
+const hlEl = $("hl");
+function syncScroll() { hlEl.scrollTop = codeBox.scrollTop; hlEl.scrollLeft = codeBox.scrollLeft; }
+function highlight() {
+  const lang = langSel.value, code = codeBox.value;
+  hlEl.innerHTML = (lang === "html" ? hlHtml(code) : SPECS[lang] ? hlCode(code, lang) : esc(code)) + "\n";
+  syncScroll();
+}
+codeBox.addEventListener("input", highlight);
+codeBox.addEventListener("scroll", syncScroll);
+
+// ---------- прикреплённые файлы
+const MAX_UPLOAD = 50 * 1024 * 1024;
+let attachments = [];
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const fmtSize = (n) => (n < 1024 ? n + " Б" : n < 1048576 ? Math.round(n / 1024) + " КБ" : (n / 1048576).toFixed(1) + " МБ");
+
+function renderChips() {
+  const box = $("chips");
+  box.replaceChildren();
+  for (const f of attachments) {
+    const b = el("button", "chip-file", f.name + " · " + fmtSize(f.size) + "  ×");
+    b.type = "button";
+    b.title = "Убрать файл";
+    b.addEventListener("click", () => { attachments = attachments.filter((x) => x !== f); renderChips(); });
+    box.append(b);
+  }
+  $("attachHint").hidden = attachments.length > 0;
+}
+
+function attach(fileList) {
+  const files = [...fileList];
+  const keep = attachments.filter((a) => !files.some((f) => f.name === a.name));
+  if ([...keep, ...files].reduce((s, f) => s + f.size, 0) > MAX_UPLOAD) {
+    setStatus("Файлы больше " + fmtSize(MAX_UPLOAD) + ": уберите лишнее", "bad");
+    return;
+  }
+  attachments = keep.concat(files);
+  renderChips();
+  if (langSel.value === "html") setStatus("В режиме HTML прикреплённые файлы не используются", "warn");
+}
+
+const toB64 = (file) => new Promise((ok, fail) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(",")[1] || "");
+  r.onerror = () => fail(r.error);
+  r.readAsDataURL(file);
+});
+
+$("attachBtn").addEventListener("click", () => $("files").click());
+$("files").addEventListener("change", (e) => { attach(e.target.files); e.target.value = ""; });
+const strip = $("attach");
+strip.addEventListener("dragover", (e) => { e.preventDefault(); strip.classList.add("drop"); });
+strip.addEventListener("dragleave", () => strip.classList.remove("drop"));
+strip.addEventListener("drop", (e) => { e.preventDefault(); strip.classList.remove("drop"); attach(e.dataTransfer.files); });
+
+// ---------- история запусков
+const HKEY = "history", HMAX = 30;
+let runs = [];
+try { runs = JSON.parse(store.get(HKEY) || "[]"); } catch {}
+const SHORT = { ok: "ok", html: "html", runtime_error: "ошибка", compilation_error: "компиляция",
+                timeout: "таймаут", memory_limit_exceeded: "память", internal_error: "сбой" };
+
+function saveHistory() {
+  for (let n = runs.length; n >= 0; n--) {   // если место кончилось, выкидываем самые старые
+    try { localStorage.setItem(HKEY, JSON.stringify(runs.slice(0, n))); return; } catch {}
+  }
+}
+
+function addHistory(status) {
+  runs.unshift({ t: Date.now(), lang: langSel.value, code: codeBox.value, status,
+                 files: status === "html" ? [] : attachments.map((f) => f.name) });
+  runs = runs.slice(0, HMAX);
+  saveHistory();
+  renderHistory();
+}
+
+function restore(h) {
+  if ([...langSel.options].some((o) => o.value === h.lang)) langSel.value = h.lang;
+  store.set("lang", langSel.value);
+  updateLangUi();
+  setCode(h.code);
+  lastTemplate = "";
+  outEl.className = "";
+  outEl.replaceChildren();
+  setStatus("Код из истории возвращён" +
+    (h.files.length ? ". Файлы (" + h.files.join(", ") + ") нужно прикрепить заново" : ""), "idle");
+  codeBox.focus();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderHistory() {
+  const list = $("hlist");
+  list.replaceChildren();
+  $("hempty").hidden = runs.length > 0;
+  $("hclear").hidden = runs.length === 0;
+  for (const h of runs) {
+    const d = new Date(h.t);
+    const when = d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString("ru-RU")
+      : d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+    const first = h.code.split("\n").find((l) => l.trim()) || "(пусто)";
+    const cls = h.status === "html" ? "ok" : (MESSAGES[h.status] || [0, "bad"])[1];
+    const b = el("button", "hrow");
+    b.type = "button";
+    b.title = "Вернуть этот код в редактор";
+    b.append(el("span", "hwhen", when), el("span", "hlang", h.lang),
+             el("span", "hcode", first + (h.files.length ? "    +" + h.files.length + " файл." : "")),
+             el("span", "chip " + cls, SHORT[h.status] || h.status));
+    b.addEventListener("click", () => restore(h));
+    const li = document.createElement("li");
+    li.append(b);
+    list.append(li);
+  }
+}
+$("hclear").addEventListener("click", () => {
+  if (confirm("Очистить историю запусков?")) { runs = []; saveHistory(); renderHistory(); }
+});
+
+const EXT = { py: "python", js: "javascript", mjs: "javascript", ts: "typescript",
+  java: "java", c: "c", cpp: "cpp", cc: "cpp", go: "go", rs: "rust", rb: "ruby",
+  php: "php", sh: "bash", html: "html", htm: "html" };
+const MAX_CHARS = 50000;
+
+async function loadFile(file) {
+  if (!file) return;
+  outEl.className = "";
+  outEl.replaceChildren();
+  const ext = file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "";
+  const lang = EXT[ext];
+  if (!lang) { setStatus("Не знаю, что за язык у файла «" + file.name + "»", "bad"); return; }
+  if (![...langSel.options].some((o) => o.value === lang)) {
+    setStatus("Сервер не поддерживает язык " + lang, "bad"); return;
+  }
+  const text = await file.text();
+  if (lang !== "html" && text.length > MAX_CHARS) {
+    setStatus("Файл слишком большой: максимум " + MAX_CHARS + " символов", "bad"); return;
+  }
+  langSel.value = lang;
+  store.set("lang", lang);
+  updateLangUi();
+  setCode(text);
+  lastTemplate = "";
+  setStatus("Загружен файл " + file.name, "idle");
+}
+
+$("upload").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => { loadFile(e.target.files[0]); e.target.value = ""; });
+codeBox.addEventListener("dragover", (e) => { e.preventDefault(); codeBox.classList.add("drop"); });
+codeBox.addEventListener("dragleave", () => codeBox.classList.remove("drop"));
+codeBox.addEventListener("drop", (e) => {
+  e.preventDefault();
+  codeBox.classList.remove("drop");
+  loadFile(e.dataTransfer.files[0]);
+});
+
+runBtn.addEventListener("click", run);
+langSel.addEventListener("change", onLangChange);
+$("memtest").addEventListener("click", () => setCode(MEMTEST[langSel.value] || ""));
+
+async function init() {
+  let langs = Object.keys(HELLO);
+  try {
+    const r = await fetch("/languages");
+    if (r.ok) langs = await r.json();
+  } catch {}
+  if (!langs.includes("html")) langs.push("html");
+  for (const l of langs) langSel.add(new Option(l, l));
+  const saved = store.get("lang");
+  langSel.value = langs.includes(saved) ? saved : langs[0];
+  setCode(HELLO[langSel.value] || "");
+  updateLangUi();
+  highlight();
+  renderHistory();
+  renderChips();
+}
+init();
+</script>
+</body>
+</html>
